@@ -1,5 +1,7 @@
 # CARLA Autonomous Driving Basic Scenario Practice
 
+🇨🇳 [中文版本](README.md) | 🌍 [English](README_EN.md)
+
 > **Project** | Implementation of a Basic Autonomous Driving Scenario Based on the CARLA Simulation Platform
 
 ## Project Overview

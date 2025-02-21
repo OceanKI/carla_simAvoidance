@@ -1,6 +1,8 @@
 
 # CARLA 自动驾驶基础场景实践
 
+🌍 [English Version](README_EN.md) | 🇨🇳 [中文](README.md)
+
 > 实践项目 | 基于CARLA仿真平台的自动驾驶基础场景实现
 
 ## 项目概述
