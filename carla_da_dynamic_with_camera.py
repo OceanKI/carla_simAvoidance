@@ -8,18 +8,19 @@ import math
 import numpy as np
 import pygame
 import util.camera as cs
+from util.redis_client import CarlaRedisClient, StatusUpdater
 
 actor_list = []
 collision_flag = False  # 添加全局变量
 is_avoiding = False  # 全局状态标记
 target_lane = None   # 目标车道点
 
+
 # 在碰撞回调中强制刹车
 def callback(event):
-    global collision_flag
-    if not collision_flag:
+    if not vehicle.collision_flag:
         vehicle.apply_control(carla.VehicleControl(brake=1.0))  # 紧急制动
-        collision_flag = True
+        vehicle.collision_flag = True
         print("碰撞！")
 
 # 车道偏离回调
@@ -107,6 +108,15 @@ def destroy_actor(world, actor):
     """
     安全销毁Carla Actor，处理控制器
     """
+    # 停止状态更新线程
+    with redis_client.lock:
+        if vehicle_id in redis_client.status_updaters:
+            redis_client.status_updaters[vehicle_id].stop()
+            redis_client.status_updaters[vehicle_id].join()
+            del redis_client.status_updaters[vehicle_id]
+            redis_client.r.hdel("carla:vehicle:status", vehicle.id)
+            print(f"更新线程已停止，缓存数据已清除。{vehicle_id}")
+
     # 处理车辆
     if 'vehicle' in actor.type_id:
         actor.set_autopilot(False)  # 禁用autopilot
@@ -129,6 +139,7 @@ def get_new_lane(current_waypoint):
 
 try:
     client = carla.Client('localhost', 2000)
+    redis_client = CarlaRedisClient()  # 使用默认配置
     client.set_timeout(5.0)
     world = client.get_world()
 
@@ -143,6 +154,15 @@ try:
     spawn_point = carla.Transform(location, rotation)
     vehicle = world.spawn_actor(v_bp, spawn_point)
     actor_list.append(vehicle)
+    # 设置车辆ID和状态标记
+    vehicle_id = f"vehicle_{vehicle.id}"
+    vehicle.collision_flag = collision_flag
+    vehicle.is_avoiding = is_avoiding
+    # 启动状态更新线程
+    with redis_client.lock:
+        updater = StatusUpdater(redis_client, vehicle)
+        updater.start()
+        redis_client.status_updaters[vehicle_id] = updater
 
     # 车周摄像头cameras设置
     pygame_size = {
@@ -206,7 +226,7 @@ try:
 
         velocity = vehicle.get_velocity()
         speed = math.sqrt(velocity.x ** 2 + velocity.y ** 2 + velocity.z ** 2)  # 计算速度大小
-        if not is_avoiding:
+        if not vehicle.is_avoiding:
             if speed < 2.5:
                 stuck_timer += 1
                 if stuck_timer > 5:  # 车速过慢超过 0.02 * 5 = 0.1 秒，触发避障
@@ -216,7 +236,7 @@ try:
                     if target_lane:
                         print("开始绕行")
                         vehicle.set_autopilot(False)
-                        is_avoiding = True
+                        vehicle.is_avoiding = True
                         stuck_timer = 0
                     else:
                         print("无可用车道，紧急停车！")
@@ -233,7 +253,7 @@ try:
             if target_distance < 1.0 or current_waypoint.lane_id == target_lane.lane_id:
                 print("绕行完成，恢复正常行驶")
                 vehicle.set_autopilot(True)
-                is_avoiding = False
+                vehicle.is_avoiding = False
                 target_lane = None
 
         time.sleep(0.02) # 控制循环频率
